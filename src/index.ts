@@ -410,7 +410,9 @@ async function runAgent(
       const isStaleSession =
         sessionId &&
         output.error &&
-        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(output.error);
+        /no conversation found|ENOENT.*\.jsonl|session.*not found/i.test(
+          output.error,
+        );
 
       if (isStaleSession) {
         logger.warn(
@@ -684,8 +686,15 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.error(
+        { channel: channelName, err },
+        'Channel failed to connect — skipping. Fix the issue and restart.',
+      );
+    }
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');
