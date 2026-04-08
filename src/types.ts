@@ -93,6 +93,13 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: send an image with optional caption.
+  sendImage?(
+    jid: string,
+    image: Buffer,
+    caption?: string,
+    mimeType?: string,
+  ): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

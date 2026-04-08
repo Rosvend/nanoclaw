@@ -50,8 +50,49 @@ server.tool(
       .describe(
         'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
       ),
+    image_path: z
+      .string()
+      .optional()
+      .describe(
+        'Path to an image file to send (e.g., a screenshot). The image is sent alongside the text as a caption. Supports PNG, JPEG, GIF, WebP.',
+      ),
   },
   async (args) => {
+    if (args.image_path) {
+      if (!fs.existsSync(args.image_path)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Image file not found: ${args.image_path}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const imageBuffer = fs.readFileSync(args.image_path);
+      const ext = path.extname(args.image_path).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+      };
+      const data = {
+        type: 'image',
+        chatJid,
+        imageBase64: imageBuffer.toString('base64'),
+        mimeType: mimeMap[ext] || 'image/png',
+        caption: args.text || undefined,
+        sender: args.sender || undefined,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      };
+      writeIpcFile(MESSAGES_DIR, data);
+      return { content: [{ type: 'text' as const, text: 'Image sent.' }] };
+    }
+
     const data: Record<string, string | undefined> = {
       type: 'message',
       chatJid,

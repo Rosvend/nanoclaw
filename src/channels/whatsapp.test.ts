@@ -773,6 +773,49 @@ describe('WhatsAppChannel', () => {
     });
   });
 
+  // --- Image sending ---
+
+  describe('sendImage', () => {
+    it('sends image with caption', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      const image = Buffer.from('fake-png-data');
+      await channel.sendImage('test@g.us', image, 'Here is the screenshot');
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
+        image,
+        caption: 'Andy: Here is the screenshot',
+        mimetype: 'image/png',
+      });
+    });
+
+    it('sends image without caption', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      const image = Buffer.from('fake-png-data');
+      await channel.sendImage('test@g.us', image);
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
+        image,
+        caption: undefined,
+        mimetype: 'image/png',
+      });
+    });
+
+    it('logs warning when disconnected', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      const image = Buffer.from('fake-png-data');
+      await channel.sendImage('test@g.us', image, 'caption');
+      expect(fakeSocket.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
   // --- Group metadata sync ---
 
   describe('group metadata sync', () => {
