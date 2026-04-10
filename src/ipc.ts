@@ -109,10 +109,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   if (deps.sendImage) {
-                    const imageBuffer = Buffer.from(
-                      data.imageBase64,
-                      'base64',
-                    );
+                    const imageBuffer = Buffer.from(data.imageBase64, 'base64');
                     await deps.sendImage(
                       data.chatJid,
                       imageBuffer,

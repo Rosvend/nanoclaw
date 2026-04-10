@@ -285,6 +285,26 @@ export class WhatsAppChannel implements Channel {
 
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
+          // LID fallback: if an incoming DM arrives with an @lid JID that
+          // we can't resolve (fresh Baileys session has no LID→phone mapping
+          // yet, and no senderPn on the message), route it to the main group.
+          // This handles the post-re-pair case where the bot owner DMs the
+          // bot from their main WhatsApp and WhatsApp's privacy-mode LID
+          // hasn't been mapped yet.
+          if (
+            chatJid.endsWith('@lid') &&
+            !groups[chatJid] &&
+            !chatJid.endsWith('@g.us')
+          ) {
+            const mainJid = Object.keys(groups).find((j) => groups[j].isMain);
+            if (mainJid) {
+              logger.info(
+                { lidJid: chatJid, mainJid },
+                'LID not resolvable, routing DM to main group',
+              );
+              chatJid = mainJid;
+            }
+          }
           if (groups[chatJid]) {
             let content =
               normalized.conversation ||
