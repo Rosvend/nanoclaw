@@ -1,6 +1,13 @@
 # NanoClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
+# --- Stage 1: Build Bitwarden agent-access CLI from source ---
+# Compiled against bookworm's glibc so it runs in the final node:22-slim image.
+FROM rust:slim-bookworm AS aac-builder
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN cargo install ap-cli --version 0.11.0 --locked
+
+# --- Stage 2: Final image ---
 FROM node:22-slim
 
 # Install system dependencies for Chromium
@@ -30,8 +37,11 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Copy Bitwarden agent-access CLI from builder (off-PATH so LLM can't call it directly)
+COPY --from=aac-builder /usr/local/cargo/bin/aac /opt/bw-aac
+
 # Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+RUN npm install -g agent-browser @anthropic-ai/claude-code @gongrzhe/server-gmail-autoauth-mcp
 
 # Create app directory
 WORKDIR /app
@@ -47,6 +57,10 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Copy Bitwarden login wrapper script (off-PATH, referenced by full path only)
+COPY scripts/bw-login.sh /opt/bw-login.sh
+RUN chmod +x /opt/bw-login.sh
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input

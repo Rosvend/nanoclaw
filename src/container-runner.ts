@@ -258,6 +258,7 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  isMain?: boolean,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -277,6 +278,13 @@ async function buildContainerArgs(
       { containerName },
       'OneCLI gateway not reachable — container will have no credentials',
     );
+  }
+
+  // Bitwarden Agent-Access: pass pairing token to main group only.
+  // Non-main groups never receive a token, so they cannot access the vault.
+  const aacToken = process.env.AAC_PAIRING_TOKEN;
+  if (isMain && aacToken) {
+    args.push('-e', `AAC_PAIRING_TOKEN=${aacToken}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -327,6 +335,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     agentIdentifier,
+    input.isMain,
   );
 
   logger.debug(
