@@ -19,6 +19,7 @@ export interface GmailChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onAuthError?: (error: string) => void;
 }
 
 interface ThreadMeta {
@@ -236,6 +237,17 @@ export class GmailChannel implements Channel {
         },
         'Gmail poll failed',
       );
+
+      // Detect auth-specific failures and alert after repeated errors
+      const isAuthError =
+        (err as any)?.response?.status === 401 ||
+        (err as any)?.response?.data?.error === 'invalid_grant' ||
+        (err as any)?.code === 401;
+      if (isAuthError && this.consecutiveErrors >= 2 && this.opts.onAuthError) {
+        this.opts.onAuthError(
+          'Gmail authentication failed repeatedly. The OAuth token may have expired. Re-authenticate with: npx -y @gongrzhe/server-gmail-autoauth-mcp auth',
+        );
+      }
     }
   }
 
@@ -361,6 +373,65 @@ export class GmailChannel implements Channel {
   }
 }
 
+/**
+ * Standalone token refresh — ensures ~/.gmail-mcp/credentials.json has a
+ * valid access token. Safe to call repeatedly; no-ops when Gmail is not
+ * configured. Used by the task scheduler before spawning containers so the
+ * container's gmail-mcp MCP server reads a fresh token.
+ */
+export async function refreshGmailTokens(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  const credDir = path.join(os.homedir(), '.gmail-mcp');
+  const keysPath = path.join(credDir, 'gcp-oauth.keys.json');
+  const tokensPath = path.join(credDir, 'credentials.json');
+
+  if (!fs.existsSync(keysPath) || !fs.existsSync(tokensPath)) {
+    return { ok: true }; // Gmail not configured — nothing to refresh
+  }
+
+  try {
+    const keys = JSON.parse(fs.readFileSync(keysPath, 'utf-8'));
+    const tokens = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
+
+    const clientConfig = keys.installed || keys.web || keys;
+    const { client_id, client_secret, redirect_uris } = clientConfig;
+    const oauth2Client = new google.auth.OAuth2(
+      client_id,
+      client_secret,
+      redirect_uris?.[0],
+    );
+    oauth2Client.setCredentials(tokens);
+
+    // Persist any refreshed tokens back to credentials.json
+    oauth2Client.on('tokens', (newTokens) => {
+      try {
+        const current = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
+        Object.assign(current, newTokens);
+        fs.writeFileSync(tokensPath, JSON.stringify(current, null, 2));
+        logger.info('Gmail OAuth tokens refreshed (pre-flight)');
+      } catch (writeErr) {
+        logger.warn({ err: writeErr }, 'Failed to persist pre-flight Gmail tokens');
+      }
+    });
+
+    // This triggers a refresh if the access token is expired
+    await oauth2Client.getAccessToken();
+    return { ok: true };
+  } catch (err) {
+    const isRefreshTokenExpired =
+      (err as any)?.response?.data?.error === 'invalid_grant' ||
+      (err instanceof Error && /invalid.grant/i.test(err.message));
+
+    const message = isRefreshTokenExpired
+      ? 'Gmail refresh token expired — re-authenticate with: npx -y @gongrzhe/server-gmail-autoauth-mcp auth'
+      : `Gmail token refresh failed: ${err instanceof Error ? err.message : String(err)}`;
+
+    logger.error({ err }, message);
+    return { ok: false, error: message };
+  }
+}
+
 registerChannel('gmail', (opts: ChannelOpts) => {
   const credDir = path.join(os.homedir(), '.gmail-mcp');
   if (
@@ -370,5 +441,24 @@ registerChannel('gmail', (opts: ChannelOpts) => {
     logger.warn('Gmail: credentials not found in ~/.gmail-mcp/');
     return null;
   }
-  return new GmailChannel(opts);
+
+  // Wire auth-error alerts: inject a system message into the main group
+  // so the agent informs the user via WhatsApp/Telegram/etc.
+  const onAuthError = (error: string) => {
+    const groups = opts.registeredGroups();
+    const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
+    if (!mainEntry) return;
+    logger.error({ error }, 'Gmail auth error — alerting main group');
+    opts.onMessage(mainEntry[0], {
+      id: `gmail-auth-${Date.now()}`,
+      chat_jid: mainEntry[0],
+      sender: 'system',
+      sender_name: 'System',
+      content: `[System Alert] ${error}`,
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+    });
+  };
+
+  return new GmailChannel({ ...opts, onAuthError });
 });

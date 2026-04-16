@@ -2,6 +2,7 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
+import { refreshGmailTokens } from './channels/gmail.js';
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
@@ -146,6 +147,24 @@ async function runTask(
       next_run: t.next_run,
     })),
   );
+
+  // Pre-flight: refresh Gmail tokens so the container's gmail-mcp reads a
+  // valid access token. Warn but don't abort — the task may not need Gmail.
+  const gmailRefresh = await refreshGmailTokens();
+  if (!gmailRefresh.ok) {
+    logger.warn(
+      { taskId: task.id, error: gmailRefresh.error },
+      'Gmail token refresh failed before task',
+    );
+    try {
+      await deps.sendMessage(
+        task.chat_jid,
+        `⚠️ Gmail auth may be broken: ${gmailRefresh.error}`,
+      );
+    } catch (_) {
+      /* best-effort alert */
+    }
+  }
 
   let result: string | null = null;
   let error: string | null = null;
